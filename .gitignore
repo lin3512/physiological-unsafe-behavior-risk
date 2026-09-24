@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+results/
+*.checkpoint.pt
+*.predictions.npz
+*.external_predictions.npz

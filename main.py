@@ -35,11 +35,20 @@ def run(args):
     raw = pd.read_csv(args.input)
     validate_input(raw)
 
+    # Resting baseline rows are calibration data, not task examples. Keep them
+    # out of the recording split and all model windows.
+    if "is_rest" not in raw.columns:
+        raise ValueError("Input must include is_rest=1 rows for the five-minute resting baseline")
+    rest_mask = pd.to_numeric(raw["is_rest"], errors="coerce").fillna(0).astype(int).eq(1)
+    task_raw = raw.loc[~rest_mask].copy()
+    if task_raw.empty:
+        raise ValueError("No task samples remain after removing is_rest=1 baseline rows")
+
     # Split original recording units before creating overlapping windows.
-    train_raw, val_raw, test_raw = split_recordings(raw, cfg["split"], cfg["seed"])
+    train_raw, val_raw, test_raw = split_recordings(task_raw, cfg["split"], cfg["seed"])
     train, val, test = [make_windows(part, cfg) for part in (train_raw, val_raw, test_raw)]
 
-    baselines = participant_baselines(train, train_raw)
+    baselines = participant_baselines(train, raw, cfg)
     training_transactions = discretize_windows([train], baselines)[0]
     rules = apriori_rules(training_transactions, cfg)
     weights = channel_weights(rules)
@@ -47,9 +56,9 @@ def run(args):
     x_train, scaler = make_feature_matrix(train, weights, fit=True)
     x_val, _ = make_feature_matrix(val, weights, scaler)
     x_test, _ = make_feature_matrix(test, weights, scaler)
-    seq_train, y_train, _ = make_sequences(train, x_train, cfg["sequence_length"])
-    seq_val, y_val, _ = make_sequences(val, x_val, cfg["sequence_length"])
-    seq_test, y_test, test_meta = make_sequences(test, x_test, cfg["sequence_length"])
+    seq_train, y_train, _ = make_sequences(train, x_train, cfg["sequence_length"], cfg["step_seconds"])
+    seq_val, y_val, _ = make_sequences(val, x_val, cfg["sequence_length"], cfg["step_seconds"])
+    seq_test, y_test, test_meta = make_sequences(test, x_test, cfg["sequence_length"], cfg["step_seconds"])
     if min(len(seq_train), len(seq_val), len(seq_test)) == 0:
         raise ValueError("Not enough sequential windows in one or more splits")
 
@@ -77,10 +86,13 @@ def run(args):
     if args.external_input:
         external_raw = pd.read_csv(args.external_input)
         validate_input(external_raw)
+        if "is_rest" in external_raw.columns:
+            external_rest = pd.to_numeric(external_raw["is_rest"], errors="coerce").fillna(0).astype(int).eq(1)
+            external_raw = external_raw.loc[~external_rest].copy()
         external_windows = make_windows(external_raw, cfg)
         external_x, _ = make_feature_matrix(external_windows, weights, scaler)
         external_seq, external_y, external_meta = make_sequences(
-            external_windows, external_x, cfg["sequence_length"])
+            external_windows, external_x, cfg["sequence_length"], cfg["step_seconds"])
         if not len(external_seq):
             raise ValueError("External input did not produce any length-17 sequences")
         external_prob = predict_probabilities(model, external_seq, device)

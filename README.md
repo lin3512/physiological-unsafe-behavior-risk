@@ -31,9 +31,9 @@ Provide a CSV with one synchronized row per timestamp and these columns:
 | `timestamp_s` | Time in seconds within the recording |
 | `ecg`, `eda`, `bp`, `spo2`, `skt` | Physiological channel values on the same timeline |
 | `label` | `0` for Normal or `1` for Unsafe |
-| `is_rest` | Optional flag (`1`) for baseline/rest rows |
+| `is_rest` | Required flag (`1`) for the participant's pre-shift five-minute resting baseline; `0` for task data |
 
-All five signal columns must already be synchronized to the same rows. Resample or align slower channels before creating the input CSV. Each recording must contain enough samples to form complete windows. The stratified 80/10/10 split also needs enough independent recordings in both label groups.
+All five signal columns must share the input timestamps. Windows are defined in seconds, and each channel is interpolated onto its configured native sampling rate before feature extraction (ECG 150 Hz, EDA 20 Hz, BP 10 Hz, SpO2 20 Hz, SKT 20 Hz). Mark the continuous pre-shift resting period with `is_rest=1`; the program uses exactly the first five minutes of a qualifying rest segment to calculate each training participant's channel-wise mean and sample standard deviation. Rest rows are excluded from task splits and model windows. Missing or shorter-than-five-minute baselines are rejected instead of being replaced with task-period statistics. Each task recording must contain enough samples to form complete windows. The stratified 80/10/10 split also needs enough independent recordings in both label groups.
 
 ## Run
 
@@ -55,7 +55,7 @@ By default, predictions use the `unsafe_threshold` in `config.json`. Add `--sele
 
 Edit `config.json` to change sampling rates, window size and stride, sequence length, model dimensions, training settings, CWT settings, association-rule thresholds, or the decision threshold. The current pipeline uses 60-second windows with a 30-second stride and sequences of 17 windows. A sequence is labeled by its final window.
 
-When `is_rest` is supplied, participant baselines are estimated from marked rest windows. Otherwise, training-window statistics are used. The CSV format is expected to contain already synchronized channels; the application does not align independent raw sensor streams.
+Participant baselines are calculated from marked raw `is_rest=1` resting samples, not task windows. The CSV format is expected to contain channels aligned to a shared timestamp column; the application interpolates these aligned signals to the native per-channel rates, but does not align independent raw sensor streams with unrelated clocks.
 
 ECG and EDA use the configurable CWT scale-energy attenuation implemented in `features.py`. It is an explicit preprocessing option and can be disabled with `cwt_enabled: false`. Tune and validate preprocessing against the intended sensor data before interpreting results.
 
